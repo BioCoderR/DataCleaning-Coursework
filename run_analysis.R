@@ -36,28 +36,10 @@ setwd(wd)
 cat("WORKING DIRECTORY HAS BEEN SET TO: ", wd, sep = "")
 
 
-# SET OPTIONS ---------------------------------------
-cat("SETTING OPTIONS... \n\n", sep = "")
-options(scipen = 999) # turns off scientific notation
-options(encoding = "UTF-8") # sets string encoding to UTF-8 instead of ANSI
-
-cat("INSTALLING PACKAGES & LOADING LIBRARIES... \n\n", sep = "")
-packages <- c("dplyr","data.table","gsubfn","tidyr") # list of packages to load
-n_packages <- length(packages) # count how many packages are required
-
-new.pkg <- packages[!(packages %in% installed.packages())] # determine which packages aren't installed
-
-# install missing packages
-if(length(new.pkg)){
-  install.packages(new.pkg)
-}
-
-# load all requried libraries
-for(n in 1:n_packages){
-  cat("Loading Library #", n, " of ", n_packages, "... Currently Loading: ", packages[n], "\n", sep = "")
-  lib_load <- paste("library(\"",packages[n],"\")", sep = "") # create string of text for loading each library
-  eval(parse(text = lib_load)) # evaluate the string to load the library
-}
+required_packages <- c("data.table", "dplyr", "tidyr")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+lapply(required_packages, library, character.only = TRUE)
 
 ## getting the data
 # from zip file
@@ -67,67 +49,79 @@ url <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR
 download.file(url, file.path(path, "data.zip"))
 unzip(zipfile = "data.zip")
 
-# Load activity labels and features
-activityLabels <- fread(
-  file.path(path, "./UCI HAR Dataset/activity_labels.txt"),
-  col.names = c("classLabels", "activityNames")
-)
+#Activity labels and features
+activitylabels <- read.table("./UCI HAR Dataset/activity_labels.txt",col.names = c('index','activityNames'))
+features <- read.table("./UCI HAR Dataset/features.txt", col.names = c("index", "featureNames"))
+file_paths <- list.files("./UCI HAR Dataset",full.names = T,recursive = T)
+file_paths
+# [1] "./UCI HAR Dataset/activity_labels.txt"                         
+# [2] "./UCI HAR Dataset/features_info.txt"                           
+# [3] "./UCI HAR Dataset/features.txt"                                
+# [4] "./UCI HAR Dataset/README.txt"                                  
+# [5] "./UCI HAR Dataset/test/Inertial Signals/body_acc_x_test.txt"   
+# [6] "./UCI HAR Dataset/test/Inertial Signals/body_acc_y_test.txt"   
+# [7] "./UCI HAR Dataset/test/Inertial Signals/body_acc_z_test.txt"   
+# [8] "./UCI HAR Dataset/test/Inertial Signals/body_gyro_x_test.txt"  
+# [9] "./UCI HAR Dataset/test/Inertial Signals/body_gyro_y_test.txt"  
+# [10] "./UCI HAR Dataset/test/Inertial Signals/body_gyro_z_test.txt"  
+# [11] "./UCI HAR Dataset/test/Inertial Signals/total_acc_x_test.txt"  
+# [12] "./UCI HAR Dataset/test/Inertial Signals/total_acc_y_test.txt"  
+# [13] "./UCI HAR Dataset/test/Inertial Signals/total_acc_z_test.txt"  
+# [14] "./UCI HAR Dataset/test/subject_test.txt"                       
+# [15] "./UCI HAR Dataset/test/X_test.txt"                             
+# [16] "./UCI HAR Dataset/test/y_test.txt"                             
+# [17] "./UCI HAR Dataset/train/Inertial Signals/body_acc_x_train.txt" 
+# [18] "./UCI HAR Dataset/train/Inertial Signals/body_acc_y_train.txt" 
+# [19] "./UCI HAR Dataset/train/Inertial Signals/body_acc_z_train.txt" 
+# [20] "./UCI HAR Dataset/train/Inertial Signals/body_gyro_x_train.txt"
+# [21] "./UCI HAR Dataset/train/Inertial Signals/body_gyro_y_train.txt"
+# [22] "./UCI HAR Dataset/train/Inertial Signals/body_gyro_z_train.txt"
+# [23] "./UCI HAR Dataset/train/Inertial Signals/total_acc_x_train.txt"
+# [24] "./UCI HAR Dataset/train/Inertial Signals/total_acc_y_train.txt"
+# [25] "./UCI HAR Dataset/train/Inertial Signals/total_acc_z_train.txt"
+# [26] "./UCI HAR Dataset/train/subject_train.txt"                     
+# [27] "./UCI HAR Dataset/train/X_train.txt"                           
+# [28] "./UCI HAR Dataset/train/y_train.txt" 
+xTrain <- read.table(file_paths[27])
+yTrain <- read.table(file_paths[28])
+xTest <- read.table(file_paths[15])
+yTest <- read.table(file_paths[16])
+subTrain <- read.table(file_paths[26])
+subTest <- read.table(file_paths[14])
+activityLabels<- read.table(file_paths[1])
+features<- read.table(file_paths[3])
+## column names change
+colnames(xTrain) <- features[,2]
+colnames(xTest) <- features[,2]
+colnames(subTrain) <- "subjectID"
+colnames(subTest) <- "subjectID"
+colnames(yTrain) <- "activityID"
+colnames(yTest) <- "activityID"
+colnames(activityLabels) <- c("activityID", "activityType")
+## 1. Merging all the data table into one main set
+TrainData <- cbind(xTrain,yTrain,subTrain)
+TestData <- cbind(xTest,yTest,subTest)
+FinalSet <- rbind(TrainData,TestData)
+## 2. Extracting only the measurements on MEAN and SD.'s for each measurement
+M_sd <- grepl("activityID|subjectID|mean\\(\\)|std\\(\\)",colnames(FinalSet))
+setMeanStd <- FinalSet[, M_sd]
 
-features <- fread(
-  file.path(path, "./UCI HAR Dataset/features.txt"),
-  col.names = c("index", "featureNames")
-)
+## 3. Using the descriptive activity names
+setActivityNames <- merge(setMeanStd, activityLabels, by = "activityID", all.x = T)
 
-# Extracting mean and std from features
-featuresNeeded <- grep("(mean|std)\\(\\)", features$featureNames)
-measurements <- features[featuresNeeded, featureNames]
-measurements <- gsubfn(
-  "(^t|^f|Acc|Gyro|Mag|BodyBody|\\(\\))",
-  list(
-    t = "Time",
-    f = "Frequency",
-    Acc = "Accelerometer",
-    Gyro = "Gyroscope",
-    Mag = "Magnitude",
-    BodyBody = "Body",
-    "()" = ""
-  ),
-  measurements
-)
+## 4. Labeling the data with descriptive variable names
+colnames(setActivityNames) %<>%
+  gsub("^t", "time", .) %>%
+  gsub("^f", "frequency", .) %>%
+  gsub("Acc", "Accelerometer", .) %>%
+  gsub("Gyro", "Gyroscope", .) %>%
+  gsub("Mag", "Magnitude", .) %>%
+  gsub("BodyBody", "Body", .)
+## 5. Creating the independent Tidy-Dataset with average of each variable for each activity and subject
 
-# Load train data
-trainData <- fread(file.path(path, "./UCI HAR Dataset/train/X_train.txt"))[, featuresNeeded, with = FALSE]
-setnames(trainData, names(trainData), measurements)
+TidyDataSet <- setActivityNames %>% 
+  group_by(subjectID,activityID,activityType) %>% 
+  summarise_all(mean)
+## Writing the TidyData file
+write.table(TidyDataSet,"TidyDataSet.txt",row.names = F)
 
-activityTrain <- fread(file.path(path, "./UCI HAR Dataset/train/y_train.txt"), col.names = "Activity")
-subjectTrain <- fread(file.path(path, "./UCI HAR Dataset/train/subject_train.txt"), col.names = "SubjectNo.")
-
-train <- bind_cols(activityTrain, subjectTrain, trainData)
-
-# Load test data in a similar fashion to train data
-testData <- fread(file.path(path, "./UCI HAR Dataset/test/X_test.txt"))[, featuresNeeded, with = FALSE]
-setnames(testData, names(testData), measurements)
-
-activityTest <- fread(file.path(path, "./UCI HAR Dataset/test/y_test.txt"), col.names = "Activity")
-subjectTest <- fread(file.path(path, "./UCI HAR Dataset/test/subject_test.txt"), col.names = "SubjectNo.")
-
-test <- bind_cols(activityTest, subjectTest, testData)
-
-# Merge test and train by rows
-combinedData <- bind_rows(train, test)
-
-# Factor Activity column based on activity labels
-combinedData <- combinedData %>%
-  mutate(
-    Activity = factor(Activity, levels = activityLabels$classLabels, labels = activityLabels$activityNames),
-    SubjectNo. = as.factor(SubjectNo.)
-  )
-
-# Pivot longer then summarise the data table
-tidyData <- combinedData %>%
-  pivot_longer(cols = -c(SubjectNo., Activity), names_to = "variable", values_to = "value") %>%
-  group_by(SubjectNo., Activity, variable) %>%
-  summarise(mean = mean(value, na.rm = TRUE), .groups = 'drop')
-
-# Write final tidy data into new file
-fwrite(tidyData, file = "tidyData.txt")
